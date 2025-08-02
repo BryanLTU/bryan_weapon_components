@@ -50,11 +50,30 @@ local Slots = {
     }
 }
 
--- lib.requestWeaponAsset('WEAPON_CARBINERIFLE', nil, 31, 63)
--- local weapon = CreateWeaponObject(GetHashKey('WEAPON_CARBINERIFLE'), 1, GetEntityCoords(PlayerPedId()).x, GetEntityCoords(PlayerPedId()).y, GetEntityCoords(PlayerPedId()).z, true, 1.0, 0)
--- GiveWeaponComponentToWeaponObject(weapon, GetHashKey('COMPONENT_AT_AR_FLSH'))
--- Wait(100)
--- GiveWeaponComponentToWeaponObject(weapon, GetHashKey('COMPONENT_CARBINERIFLE_VARMOD_LUXE'))
+local luxeModels = {
+    [`WEAPON_PISTOL`]           = `w_pi_pistol_luxe`,
+    [`WEAPON_COMBATPISTOL`]     = `w_pi_combatpistol_luxe`,
+    [`WEAPON_HEAVYPISTOL`]      = `w_pi_heavypistol_luxe`,
+    [`WEAPON_VINTAGEPISTOL`]    = `w_pi_vintage_pistol_luxe`,
+    [`WEAPON_MARKSMANPISTOL`]   = `w_pi_singleshot_luxe`,
+    [`WEAPON_SNSPISTOL`]        = `w_pi_sns_pistol_luxe`,
+    [`WEAPON_MICROSMG`]         = `w_sb_microsmg_luxe`,
+    [`WEAPON_SMG`]              = `w_sb_smg_luxe`,
+    [`WEAPON_ASSAULTSMG`]       = `w_sb_assaultsmg_luxe`,
+    [`WEAPON_ASSAULTRIFLE`]     = `w_ar_assaultrifle_luxe`,
+    [`WEAPON_CARBINERIFLE`]     = `w_ar_carbinerifle_luxe`,
+    [`WEAPON_ADVANCEDRIFLE`]    = `w_ar_advancedrifle_luxe`,
+    [`WEAPON_SPECIALCARBINE`]   = `w_ar_specialcarbine_luxe`,
+    [`WEAPON_BULLPUPRIFLE`]     = `w_ar_bullpuprifle_luxe`,
+    [`WEAPON_MG`]               = `w_mg_mg_luxe`,
+    [`WEAPON_COMBATMG`]         = `w_mg_combatmg_luxe`,
+    [`WEAPON_PUMPSHOTGUN`]      = `w_sg_pumpshotgun_luxe`,
+    [`WEAPON_ASSAULTSHOTGUN`]   = `w_sg_assaultshotgun_luxe`,
+    [`WEAPON_BULLPUPSHOTGUN`]   = `w_sg_bullpupshotgun_luxe`,
+    [`WEAPON_SNIPERRIFLE`]      = `w_sr_sniperrifle_luxe`,
+    [`WEAPON_HEAVYSNIPER`]      = `w_sr_heavysniper_luxe`,
+    [`WEAPON_MARKSMANRIFLE`]    = `w_sr_marksmanrifle_luxe`
+}
 
 ---Get compatible components for weapon hash
 ---@param weaponHash number
@@ -150,7 +169,6 @@ local updateSlots = function()
             pos = boneIndex ~= -1 and GetWorldPositionOfEntityBone(inspectingWeapon.object, boneIndex) or nil
         end
 
-        -- lib.print.info(slot.bone, boneIndex ~= -1)
         if pos then
             local onScreen, x, y = World3dToScreen2d(pos.x, pos.y, pos.z)
 
@@ -164,41 +182,59 @@ local updateSlots = function()
             end
         end
     end
+end
 
-    -- for _, bone in ipairs({
-    --     "gun_root",
-    --     "gun_gripr",
-    --     "gun_gripl",
-    --     "gun_muzzle",
-    --     "gun_vfx_eject",
-    --     "gun_magazine",
-    --     "gun_ammo",
-    --     "gun_vfx_projtrail",
-    --     "gun_barrels",
-    --     "WAPClip",
-    --     "WAPClip_2",
-    --     "WAPScop",
-    --     "WAPScop_2",
-    --     "WAPGrip",
-    --     "WAPGrip_2",
-    --     "WAPSupp",
-    --     "WAPSupp_2",
-    --     "WAPFlsh",
-    --     "WAPFlsh_2",
-    --     "WAPStck",
-    --     "WAPSeWp",
-    --     "WAPLasr",
-    --     "WAPLasr_2",
-    --     "WAPFlshLasr",
-    --     "WAPFlshLasr_2",
-    --     "NM_Butt_Marker",
-    --     "Gun_GripR",
-    --     "Gun_Nuzzle",
-    --     "gun_drum"
-    -- }) do
-    --     local boneIndex = GetEntityBoneIndexByName(inspectingWeapon.object, bone)
-    --     lib.print.info(bone, boneIndex ~= -1)
-    -- end
+--- Spawn weapon in front of ped, and make camera to look at that weapon zoomed in
+---@param hash number
+---@param customHash number?
+---@return integer
+local createWeaponPreviewObject = function(hash, customHash)
+    local ped = PlayerPedId()
+    local coords = GetEntityCoords(ped)
+    local forward = GetEntityForwardVector(ped)
+    local previewCoords = coords + (forward * 1.0) + vector3(0.0, 0.0, 0.5)
+    local heading = GetEntityHeading(ped) + 180.0
+
+    RequestWeaponAsset(hash, 31, 1 | 2 | 4 | 8 | 16 | 32)
+    while not HasWeaponAssetLoaded(hash) do Citizen.Wait(0) end
+
+    if customHash then
+        lib.requestModel(customHash)
+    end
+
+    local object = CreateWeaponObject(hash, 0, previewCoords.x, previewCoords.y, previewCoords.z, true, 1.0, customHash or 0)
+    SetEntityHeading(object, heading)
+    FreezeEntityPosition(object, true)
+    SetEntityCollision(object, false, true)
+    SetEntityInvincible(object, true)
+    SetEntityVelocity(object, 0.0, 0.0, 0.0)
+
+    return object
+end
+
+---@param weaponHash number
+---@param components Component[]
+---@return number dummyPed
+local createDummyPedWithWeapon = function(weaponHash, components)
+    local model = `mp_m_freemode_01`
+
+    lib.requestModel(model)
+
+    local coords = GetEntityCoords(PlayerPedId())
+    local ped = CreatePed(4, model, coords.x, coords.y, coords.z, 0.0, false, true)
+
+    SetEntityVisible(ped, false, false)
+    SetEntityInvincible(ped, true)
+    FreezeEntityPosition(ped, true)
+    SetEntityCollision(ped, false, false)
+
+    GiveWeaponToPed(ped, weaponHash, 0, true, true)
+
+    for _, component in ipairs(components) do
+        GiveWeaponComponentToPed(ped, weaponHash, component.component)
+    end
+
+    return ped
 end
 
 ---Update weapon object's components
@@ -207,16 +243,48 @@ end
 ---@param attachedComponents string[]
 ---@param components Component[]
 local updatePreviewComponents = function(weaponObject, weaponHash, attachedComponents, components)
-    for _, component in ipairs(components) do
-        local isInPrevTable = inspectingWeapon?.attachedComponents and lib.table.contains(inspectingWeapon?.attachedComponents, component.name) or false
-        local isInNewTable = lib.table.contains(attachedComponents, component.name)
+    local dummyPed = createDummyPedWithWeapon(weaponHash, components)
 
-        if isInPrevTable and not isInNewTable then
-            RemoveWeaponComponentFromWeaponObject(weaponObject, component.component)
-        elseif not isInPrevTable and isInNewTable then
-            GiveWeaponComponentToWeaponObject(weaponObject, component.component)
+    local skinComponent = lib.array.find(components, function (component)
+        return component.type == 'skin'
+    end)
+
+    local skinUpdated = false
+
+    if skinComponent then
+        local isInPrevTable = inspectingWeapon?.attachedComponents and lib.table.contains(inspectingWeapon?.attachedComponents, skinComponent.name) or false
+        local isInNewTable = lib.table.contains(attachedComponents, skinComponent.name)
+
+        if (not isInPrevTable and isInNewTable) or (isInPrevTable and not isInNewTable) then
+            if inspectingWeapon then
+                DeleteEntity(weaponObject)
+                weaponObject = createWeaponPreviewObject(weaponHash, isInNewTable and luxeModels[weaponHash] or nil)
+                inspectingWeapon.object = weaponObject
+                skinUpdated = true
+            end
+
+            if not isInPrevTable and isInNewTable then
+                GiveWeaponComponentToWeaponObject(weaponObject, skinComponent.component)
+            end
         end
     end
+
+    for _, component in ipairs(components) do
+        if component.type ~= 'skin' then
+            local isInPrevTable = inspectingWeapon?.attachedComponents and lib.table.contains(inspectingWeapon?.attachedComponents, component.name) or false
+            local isInNewTable = lib.table.contains(attachedComponents, component.name)
+
+            if (skinUpdated and isInPrevTable) or (isInPrevTable and not isInNewTable) then
+                RemoveWeaponComponentFromWeaponObject(weaponObject, component.component)
+            end
+
+            if (skinUpdated and isInNewTable) or (not isInPrevTable and isInNewTable) then
+                GiveWeaponComponentToWeaponObject(weaponObject, component.component)
+            end
+        end
+    end
+
+    DeleteEntity(dummyPed)
 end
 
 RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
@@ -236,31 +304,22 @@ RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
 
     local availableComponents = lib.callback.await('bryan_weapon_components:server:getInventoryComponents', false, components)
 
-    -- Spawn weapon in front of ped, and make camera to look at that weapon zoomed in
-    local ped = PlayerPedId()
-    local coords = GetEntityCoords(ped)
-    local forward = GetEntityForwardVector(ped)
-    local previewCoords = coords + (forward * 1.0) + vector3(0.0, 0.0, 0.5)
-
-    RequestWeaponAsset(weaponHash, 31, 1 | 2 | 4 | 8 | 16 | 32)
-    while not HasWeaponAssetLoaded(weaponHash) do Citizen.Wait(10) end
-
-    local previewObject = CreateWeaponObject(weaponHash, 0, previewCoords.x, previewCoords.y, previewCoords.z, false, 1.0, 0)
-    SetEntityHeading(previewObject, GetEntityHeading(ped) + 180)
-    FreezeEntityPosition(previewObject, true)
-    SetEntityCollision(previewObject, false, true)
-    SetEntityInvincible(previewObject, true)
-    SetEntityVelocity(previewObject, 0.0, 0.0, 0.0)
-
+    local hasSkin = lib.array.find(attachedComponents, function (attachedComponent)
+        return string.find(attachedComponent, '_luxe') ~= nil
+    end) ~= nil
+    local previewObject = createWeaponPreviewObject(weaponHash, hasSkin and luxeModels[weaponHash] or nil)
     -- Components
     updatePreviewComponents(previewObject, weaponHash, attachedComponents, components)
 
+    local ped = PlayerPedId()
+    local coords = GetEntityCoords(ped)
+    local forward = GetEntityForwardVector(ped)
     local camCoords = coords + (forward * 1.5) + vector3(0.0, 0.0, 0.5)
     local cam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
     SetCamCoord(cam, camCoords.x, camCoords.y, camCoords.z)
     PointCamAtEntity(cam, previewObject, 0.0, 0.0, 0.0, false)
     SetCamActive(cam, true)
-    RenderScriptCams(true, false, 0, true, true)
+    RenderScriptCams(true, true, 500, true, true)
 
     inspectingWeapon = {
         object = previewObject,
@@ -272,7 +331,7 @@ RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
         components = components
     }
 
-    Citizen.Wait(500)
+    Citizen.Wait(1000)
     updateSlots()
 
     -- NUI open

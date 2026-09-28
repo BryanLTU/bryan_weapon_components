@@ -183,6 +183,15 @@ local updateSlots = function()
     end
 end
 
+---Update slot positions on the next frame, once a respawned object and new components have bones in place
+local refreshSlots = function()
+    Citizen.Wait(0)
+
+    if inspectingWeapon and DoesEntityExist(inspectingWeapon.object) then
+        updateSlots()
+    end
+end
+
 --- Spawn weapon in front of ped, and make camera to look at that weapon zoomed in
 ---@param hash number
 ---@param customHash number?
@@ -256,8 +265,11 @@ local updatePreviewComponents = function(weaponObject, weaponHash, attachedCompo
 
         if (not isInPrevTable and isInNewTable) or (isInPrevTable and not isInNewTable) then
             if inspectingWeapon then
+                local rotation = GetEntityRotation(weaponObject, 2)
+
                 DeleteEntity(weaponObject)
                 weaponObject = createWeaponPreviewObject(weaponHash, isInNewTable and luxeModels[weaponHash] or nil)
+                SetEntityRotation(weaponObject, rotation.x, rotation.y, rotation.z, 2, true)
                 inspectingWeapon.object = weaponObject
                 skinUpdated = true
             end
@@ -431,6 +443,7 @@ RegisterNUICallback('attach', function(data, cb)
         syncEquippedWeapon(attachedComponents)
 
         inspectingWeapon.attachedComponents = attachedComponents
+        refreshSlots()
 
         return cb({
             attachedComponents = getAttachedComponents(inspectingWeapon.components, attachedComponents),
@@ -470,6 +483,7 @@ RegisterNUICallback('remove', function(data, cb)
         syncEquippedWeapon(attachedComponents)
 
         inspectingWeapon.attachedComponents = attachedComponents
+        refreshSlots()
 
         return cb({
             attachedComponents = getAttachedComponents(inspectingWeapon.components, attachedComponents),

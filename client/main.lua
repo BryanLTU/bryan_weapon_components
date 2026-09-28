@@ -294,6 +294,8 @@ RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
         return
     end
 
+    SetNuiFocus(true, true)
+
     local model, attachedComponents = weaponData.model, weaponData.components
 
     local weaponHash = GetHashKey(model)
@@ -340,7 +342,6 @@ RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
         availableComponents = availableComponents,
         attachedComponents = getAttachedComponents(components, attachedComponents)
     })
-    SetNuiFocus(true, true)
 end)
 
 RegisterNUICallback("close", function(_, cb)

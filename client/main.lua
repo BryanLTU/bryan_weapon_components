@@ -287,6 +287,30 @@ local updatePreviewComponents = function(weaponObject, weaponHash, attachedCompo
     DeleteEntity(dummyPed)
 end
 
+---Apply components to the weapon in the player's hands if it is the one being inspected,
+---ox_inventory only applies metadata components on equip
+---@param attachedComponents string[]
+local syncEquippedWeapon = function(attachedComponents)
+    local currentWeapon = ox_inventory:getCurrentWeapon()
+
+    if not currentWeapon or currentWeapon.slot ~= tonumber(inspectingWeapon.slot) then
+        return
+    end
+
+    local ped = PlayerPedId()
+
+    for _, component in ipairs(inspectingWeapon.components) do
+        local isAttached = lib.table.contains(attachedComponents, component.name)
+        local hasComponent = HasPedGotWeaponComponent(ped, currentWeapon.hash, component.component)
+
+        if isAttached and not hasComponent then
+            GiveWeaponComponentToPed(ped, currentWeapon.hash, component.component)
+        elseif not isAttached and hasComponent then
+            RemoveWeaponComponentFromPed(ped, currentWeapon.hash, component.component)
+        end
+    end
+end
+
 RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
     local weaponData = lib.callback.await('bryan_weapon_components:server:getWeapon', false, slotId)
 
@@ -405,6 +429,7 @@ RegisterNUICallback('attach', function(data, cb)
         local availableComponents = lib.callback.await('bryan_weapon_components:server:getInventoryComponents', false, inspectingWeapon.components)
 
         updatePreviewComponents(inspectingWeapon.object, GetHashKey(inspectingWeapon.model), attachedComponents, inspectingWeapon.components)
+        syncEquippedWeapon(attachedComponents)
 
         inspectingWeapon.attachedComponents = attachedComponents
 
@@ -443,6 +468,7 @@ RegisterNUICallback('remove', function(data, cb)
         local availableComponents = lib.callback.await('bryan_weapon_components:server:getInventoryComponents', false, inspectingWeapon.components)
 
         updatePreviewComponents(inspectingWeapon.object, GetHashKey(inspectingWeapon.model), attachedComponents, inspectingWeapon.components)
+        syncEquippedWeapon(attachedComponents)
 
         inspectingWeapon.attachedComponents = attachedComponents
 

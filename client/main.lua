@@ -25,7 +25,7 @@ local Slots = {
         flag = 1
     },
     {
-        type = 'scope',
+        type = 'sight',
         bone = 'WAPScop_2',
         flag = 2
     },
@@ -136,23 +136,22 @@ local getCompatibleComponentsSlots = function(weaponName, components)
     end)
 end
 
----comment
+---Get attached components paired with their slot, components without a slot are skipped
 ---@param components Component[]
 ---@param attachedComponents string[]
 ---@return SlotComponent[]
 local getAttachedComponents = function(components, attachedComponents)
     components = lib.array.filter(components, function(component)
         return lib.table.contains(attachedComponents, component.name)
+            and lib.array.find(Slots, function(slot)
+                return slot.type == component.type
+            end) ~= nil
     end)
 
-    return lib.array.map(components, function(c, index, array)
-        local slot = lib.array.find(Slots, function(s)
-            return s.type == c.type
-        end)
-
+    return lib.array.map(components, function(component)
         return {
-            component = c,
-            slotType = slot.type
+            component = component,
+            slotType = component.type
         }
     end)
 end

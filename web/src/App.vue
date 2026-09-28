@@ -304,7 +304,7 @@ const endDrag = async () => {
     inset: 0;
     pointer-events: none;
     background:
-        radial-gradient(ellipse 55% 60% at 55% 50%, rgba(0, 0, 0, 0.35) 0%, rgba(0, 0, 0, 0.8) 70%, rgba(0, 0, 0, 0.92) 100%);
+        radial-gradient(ellipse 55% 60% at 55% 50%, rgba(0, 0, 0, 0.15) 0%, rgba(0, 0, 0, 0.5) 70%, rgba(0, 0, 0, 0.92) 100%);
 }
 
 .panel {

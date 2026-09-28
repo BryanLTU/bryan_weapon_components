@@ -245,6 +245,24 @@ local createDummyPedWithWeapon = function(weaponHash, components)
     return ped
 end
 
+---Get the skin component attached to the weapon, only one can be attached at a time
+---@param components Component[]
+---@param attachedComponents string[]
+---@return Component?
+local getAttachedSkin = function(components, attachedComponents)
+    return lib.array.find(components, function(component)
+        return component.type == 'skin' and lib.table.contains(attachedComponents, component.name)
+    end)
+end
+
+---Get the model the weapon object has to be created with for the attached skin
+---@param weaponHash number
+---@param skin Component?
+---@return number?
+local getSkinModel = function(weaponHash, skin)
+    return skin and luxeModels[weaponHash] or nil
+end
+
 ---Update weapon object's components
 ---@param weaponObject number
 ---@param weaponHash number
@@ -253,45 +271,32 @@ end
 local updatePreviewComponents = function(weaponObject, weaponHash, attachedComponents, components)
     local dummyPed = createDummyPedWithWeapon(weaponHash, components)
 
-    local skinComponent = lib.array.find(components, function (component)
-        return component.type == 'skin'
-    end)
+    local prevAttachedComponents = inspectingWeapon?.attachedComponents or {}
+    local prevModel = getSkinModel(weaponHash, getAttachedSkin(components, prevAttachedComponents))
+    local newModel = getSkinModel(weaponHash, getAttachedSkin(components, attachedComponents))
+    local respawned = false
 
-    local skinUpdated = false
+    -- Luxe skins replace the whole weapon model, so the object has to be recreated with it
+    if inspectingWeapon and prevModel ~= newModel then
+        -- Keep the player's rotation on the respawned object
+        local rotation = GetEntityRotation(weaponObject, 2)
 
-    if skinComponent then
-        local isInPrevTable = inspectingWeapon?.attachedComponents and lib.table.contains(inspectingWeapon?.attachedComponents, skinComponent.name) or false
-        local isInNewTable = lib.table.contains(attachedComponents, skinComponent.name)
-
-        if (not isInPrevTable and isInNewTable) or (isInPrevTable and not isInNewTable) then
-            if inspectingWeapon then
-                local rotation = GetEntityRotation(weaponObject, 2)
-
-                DeleteEntity(weaponObject)
-                weaponObject = createWeaponPreviewObject(weaponHash, isInNewTable and luxeModels[weaponHash] or nil)
-                SetEntityRotation(weaponObject, rotation.x, rotation.y, rotation.z, 2, true)
-                inspectingWeapon.object = weaponObject
-                skinUpdated = true
-            end
-
-            if not isInPrevTable and isInNewTable then
-                GiveWeaponComponentToWeaponObject(weaponObject, skinComponent.component)
-            end
-        end
+        DeleteEntity(weaponObject)
+        weaponObject = createWeaponPreviewObject(weaponHash, newModel)
+        SetEntityRotation(weaponObject, rotation.x, rotation.y, rotation.z, 2, true)
+        inspectingWeapon.object = weaponObject
+        respawned = true
     end
 
     for _, component in ipairs(components) do
-        if component.type ~= 'skin' then
-            local isInPrevTable = inspectingWeapon?.attachedComponents and lib.table.contains(inspectingWeapon?.attachedComponents, component.name) or false
-            local isInNewTable = lib.table.contains(attachedComponents, component.name)
+        -- A respawned object has no components, everything attached has to be given again
+        local wasAttached = not respawned and lib.table.contains(prevAttachedComponents, component.name)
+        local isAttached = lib.table.contains(attachedComponents, component.name)
 
-            if (skinUpdated and isInPrevTable) or (isInPrevTable and not isInNewTable) then
-                RemoveWeaponComponentFromWeaponObject(weaponObject, component.component)
-            end
-
-            if (skinUpdated and isInNewTable) or (not isInPrevTable and isInNewTable) then
-                GiveWeaponComponentToWeaponObject(weaponObject, component.component)
-            end
+        if wasAttached and not isAttached then
+            RemoveWeaponComponentFromWeaponObject(weaponObject, component.component)
+        elseif isAttached and not wasAttached then
+            GiveWeaponComponentToWeaponObject(weaponObject, component.component)
         end
     end
 
@@ -341,10 +346,8 @@ RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
 
     local availableComponents = lib.callback.await('bryan_weapon_components:server:getInventoryComponents', false, components)
 
-    local hasSkin = lib.array.find(attachedComponents, function (attachedComponent)
-        return string.find(attachedComponent, '_luxe') ~= nil
-    end) ~= nil
-    local previewObject = createWeaponPreviewObject(weaponHash, hasSkin and luxeModels[weaponHash] or nil)
+    local skinModel = getSkinModel(weaponHash, getAttachedSkin(components, attachedComponents))
+    local previewObject = createWeaponPreviewObject(weaponHash, skinModel)
     -- Components
     updatePreviewComponents(previewObject, weaponHash, attachedComponents, components)
 

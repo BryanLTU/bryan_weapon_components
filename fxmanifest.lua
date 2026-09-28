@@ -1,6 +1,8 @@
 fx_version 'cerulean'
 game 'gta5'
 
+author 'BryaN'
+
 lua54 'yes'
 
 ui_page 'web/dist/index.html'

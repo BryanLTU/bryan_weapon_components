@@ -56,7 +56,7 @@ Restart the server after editing. ox_inventory sends buttons to the player when 
 
 ## Components
 
-Components come from the `Components` section of `ox_inventory/data/weapons.lua`. A component only shows up in the menu if the weapon accepts it and its `type` is one of these slots:
+Components come from the `Components` section of `ox_inventory/data/weapons.lua`. A component only shows up in the menu if the weapon accepts it and its `type` matches a slot in `Config.Slots` (`config.lua`). The default slots are:
 
 | `type`       | Slot       |
 |--------------|------------|

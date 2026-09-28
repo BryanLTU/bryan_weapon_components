@@ -5,11 +5,6 @@
 ---@field type string
 ---@field image string
 
----@class Slot
----@field type string
----@field bone string?
----@field flag number
-
 ---@class SlotComponent
 ---@field component Component
 ---@field slotType string
@@ -17,72 +12,6 @@
 local ox_inventory = exports.ox_inventory
 local inspectingWeapon
 local isOpening = false
-
--- Preview placement in front of the ped
-local PREVIEW_DISTANCE = 1.0
-local CAMERA_DISTANCE = 1.5
-local PREVIEW_HEIGHT = 0.5
-
--- Distance the ped can move from where inspection was opened before it closes
-local MAX_MOVE_DISTANCE = 1.0
-
----@type Slot[]
-local Slots = {
-    {
-        type = 'flashlight',
-        bone = 'WAPFlshLasr',
-        flag = 1
-    },
-    {
-        type = 'sight',
-        bone = 'WAPScop_2',
-        flag = 2
-    },
-    {
-        type = 'muzzle',
-        bone = 'gun_muzzle',
-        flag = 4
-    },
-    {
-        type = 'magazine',
-        bone = 'WAPClip',
-        flag = 8
-    },
-    {
-        type = 'grip',
-        bone = 'WAPGrip',
-        flag = 16
-    },
-    {
-        type = 'skin',
-        flag = 64
-    }
-}
-
-local luxeModels = {
-    [`WEAPON_PISTOL`]           = `w_pi_pistol_luxe`,
-    [`WEAPON_COMBATPISTOL`]     = `w_pi_combatpistol_luxe`,
-    [`WEAPON_HEAVYPISTOL`]      = `w_pi_heavypistol_luxe`,
-    [`WEAPON_VINTAGEPISTOL`]    = `w_pi_vintage_pistol_luxe`,
-    [`WEAPON_MARKSMANPISTOL`]   = `w_pi_singleshot_luxe`,
-    [`WEAPON_SNSPISTOL`]        = `w_pi_sns_pistol_luxe`,
-    [`WEAPON_MICROSMG`]         = `w_sb_microsmg_luxe`,
-    [`WEAPON_SMG`]              = `w_sb_smg_luxe`,
-    [`WEAPON_ASSAULTSMG`]       = `w_sb_assaultsmg_luxe`,
-    [`WEAPON_ASSAULTRIFLE`]     = `w_ar_assaultrifle_luxe`,
-    [`WEAPON_CARBINERIFLE`]     = `w_ar_carbinerifle_luxe`,
-    [`WEAPON_ADVANCEDRIFLE`]    = `w_ar_advancedrifle_luxe`,
-    [`WEAPON_SPECIALCARBINE`]   = `w_ar_specialcarbine_luxe`,
-    [`WEAPON_BULLPUPRIFLE`]     = `w_ar_bullpuprifle_luxe`,
-    [`WEAPON_MG`]               = `w_mg_mg_luxe`,
-    [`WEAPON_COMBATMG`]         = `w_mg_combatmg_luxe`,
-    [`WEAPON_PUMPSHOTGUN`]      = `w_sg_pumpshotgun_luxe`,
-    [`WEAPON_ASSAULTSHOTGUN`]   = `w_sg_assaultshotgun_luxe`,
-    [`WEAPON_BULLPUPSHOTGUN`]   = `w_sg_bullpupshotgun_luxe`,
-    [`WEAPON_SNIPERRIFLE`]      = `w_sr_sniperrifle_luxe`,
-    [`WEAPON_HEAVYSNIPER`]      = `w_sr_heavysniper_luxe`,
-    [`WEAPON_MARKSMANRIFLE`]    = `w_sr_marksmanrifle_luxe`
-}
 
 ---Get compatible components for weapon hash
 ---@param weaponHash number
@@ -141,7 +70,7 @@ local getCompatibleComponentsSlots = function(weaponName, components)
         return component.type
     end)
 
-    return lib.array.filter(Slots, function(slot)
+    return lib.array.filter(Config.Slots, function(slot)
         return lib.table.contains(types, slot.type)
     end)
 end
@@ -153,7 +82,7 @@ end
 local getAttachedComponents = function(components, attachedComponents)
     components = lib.array.filter(components, function(component)
         return lib.table.contains(attachedComponents, component.name)
-            and lib.array.find(Slots, function(slot)
+            and lib.array.find(Config.Slots, function(slot)
                 return slot.type == component.type
             end) ~= nil
     end)
@@ -217,7 +146,7 @@ local createWeaponPreviewObject = function(hash, customHash)
     local ped = PlayerPedId()
     local coords = GetEntityCoords(ped)
     local forward = GetEntityForwardVector(ped)
-    local previewCoords = coords + (forward * PREVIEW_DISTANCE) + vector3(0.0, 0.0, PREVIEW_HEIGHT)
+    local previewCoords = coords + (forward * Config.PreviewDistance) + vector3(0.0, 0.0, Config.PreviewHeight)
     local heading = GetEntityHeading(ped) + 180.0
 
     RequestWeaponAsset(hash, 31, 1 | 2 | 4 | 8 | 16 | 32)
@@ -277,7 +206,7 @@ end
 ---@param skin Component?
 ---@return number?
 local getSkinModel = function(weaponHash, skin)
-    return skin and luxeModels[weaponHash] or nil
+    return skin and Config.LuxeModels[weaponHash] or nil
 end
 
 ---Update weapon object's components
@@ -352,13 +281,33 @@ end
 ---@param ped number
 ---@return boolean
 local hasPreviewSpace = function(ped)
-    local from = GetEntityCoords(ped) + vector3(0.0, 0.0, PREVIEW_HEIGHT)
-    local to = from + GetEntityForwardVector(ped) * (CAMERA_DISTANCE + 0.3)
+    local from = GetEntityCoords(ped) + vector3(0.0, 0.0, Config.PreviewHeight)
+    local to = from + GetEntityForwardVector(ped) * (Config.CameraDistance + 0.3)
 
     local handle = StartExpensiveSynchronousShapeTestLosProbe(from.x, from.y, from.z, to.x, to.y, to.z, 1 | 2 | 16, ped, 7)
     local _, hit = GetShapeTestResult(handle)
 
     return not (hit == true or hit == 1)
+end
+
+---Close the inspection when the preview can no longer be seen properly, it doesn't follow the ped
+---@param inspecting table
+local watchInspection = function(inspecting)
+    Citizen.CreateThread(function()
+        while inspectingWeapon == inspecting do
+            local ped = PlayerPedId()
+
+            if not DoesEntityExist(inspecting.object)
+                or IsEntityDead(ped)
+                or IsPedInAnyVehicle(ped, true)
+                or #(GetEntityCoords(ped) - inspecting.coords) > Config.MaxMoveDistance then
+                exitInspection()
+                break
+            end
+
+            Citizen.Wait(500)
+        end
+    end)
 end
 
 ---Create the preview and camera, then open the UI
@@ -400,6 +349,7 @@ local openInspection = function(slotId)
         coords = coords
     }
     inspectingWeapon = inspecting
+    watchInspection(inspecting)
 
     inspecting.object = updatePreviewComponents(previewObject, weaponHash, nil, attachedComponents, components)
 
@@ -409,7 +359,7 @@ local openInspection = function(slotId)
     end
 
     local forward = GetEntityForwardVector(ped)
-    local camCoords = coords + (forward * CAMERA_DISTANCE) + vector3(0.0, 0.0, PREVIEW_HEIGHT)
+    local camCoords = coords + (forward * Config.CameraDistance) + vector3(0.0, 0.0, Config.PreviewHeight)
     local cam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
     SetCamCoord(cam, camCoords.x, camCoords.y, camCoords.z)
     PointCamAtEntity(cam, inspecting.object, 0.0, 0.0, 0.0, false)
@@ -536,7 +486,7 @@ RegisterNUICallback('attach', function(data, cb)
         return cb(false)
     end
 
-    for _, slot in ipairs(Slots) do
+    for _, slot in ipairs(Config.Slots) do
         if slot.type == component.type then
             if slotType ~= slot.type then
                 lib.notify({

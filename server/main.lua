@@ -52,7 +52,11 @@ lib.callback.register('bryan_weapon_components:server:updateComponents', functio
     -- Never trust the client's component data, use the server item definition
     local item = type(component?.name) == 'string' and ox_inventory:Items(component.name)
 
-    if not item or not item.component or not item.type then
+    local hasSlot = item and lib.array.find(Config.Slots, function(componentSlot)
+        return componentSlot.type == item.type
+    end) ~= nil
+
+    if not item or not item.component or not hasSlot then
         notifyError(source, 'Invalid component')
         return false
     end

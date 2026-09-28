@@ -1,6 +1,28 @@
-body, #app {
+:root {
+    --bg-panel: rgba(12, 13, 16, 0.94);
+    --bg-card: rgba(255, 255, 255, 0.04);
+    --bg-card-hover: rgba(255, 255, 255, 0.08);
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.18);
+    --text: #f2f2f4;
+    --text-muted: rgba(242, 242, 244, 0.55);
+    --text-faint: rgba(242, 242, 244, 0.35);
+    --accent: #f0b43c;
+    --accent-soft: rgba(240, 180, 60, 0.16);
+    --accent-glow: rgba(240, 180, 60, 0.45);
+    --danger: #ef5b5b;
+    --radius: 10px;
+
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Game renders behind the NUI frame, keep the page itself transparent */
+html, body, #app {
     padding: 0;
     margin: 0;
+    background: transparent;
 }
 
 * {

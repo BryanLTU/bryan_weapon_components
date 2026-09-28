@@ -17,6 +17,9 @@
 local ox_inventory = exports.ox_inventory
 local inspectingWeapon
 
+-- Distance the ped can move from where inspection was opened before it closes
+local MAX_MOVE_DISTANCE = 1.0
+
 ---@type Slot[]
 local Slots = {
     {
@@ -328,6 +331,15 @@ local syncEquippedWeapon = function(attachedComponents)
 end
 
 RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
+    if IsPedInAnyVehicle(PlayerPedId(), true) then
+        lib.notify({
+            title = 'Weapon Component',
+            description = 'You cannot inspect weapons in a vehicle',
+            type = 'error'
+        })
+        return
+    end
+
     local weaponData = lib.callback.await('bryan_weapon_components:server:getWeapon', false, slotId)
 
     if not weaponData?.model then
@@ -368,7 +380,8 @@ RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
         slots = getCompatibleComponentsSlots(nil, components),
         attachedComponents = attachedComponents,
         slot = slotId,
-        components = components
+        components = components,
+        coords = coords
     }
 
     Citizen.Wait(1000)
@@ -500,8 +513,15 @@ end)
 
 Citizen.CreateThread(function()
     while true do
-        if inspectingWeapon and not DoesEntityExist(inspectingWeapon.object) then
-            exitInspection()
+        if inspectingWeapon then
+            local ped = PlayerPedId()
+
+            -- Close when the preview can no longer be seen properly, it doesn't follow the ped
+            if not DoesEntityExist(inspectingWeapon.object)
+                or IsPedInAnyVehicle(ped, true)
+                or #(GetEntityCoords(ped) - inspectingWeapon.coords) > MAX_MOVE_DISTANCE then
+                exitInspection()
+            end
         end
 
         Citizen.Wait(500)

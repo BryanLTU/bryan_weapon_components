@@ -61,11 +61,10 @@ local exitInspection = function()
     SendNUIMessage({ action = "close" })
 end
 
----Get bones for slots
----@param weaponName string|nil To access override list
+---Get slots the weapon has compatible components for
 ---@param components Component[]
 ---@return Slot[]
-local getCompatibleComponentsSlots = function(weaponName, components)
+local getCompatibleComponentsSlots = function(components)
     local types = lib.array.map(components, function(component)
         return component.type
     end)
@@ -157,6 +156,11 @@ local createWeaponPreviewObject = function(hash, customHash)
     end
 
     local object = CreateWeaponObject(hash, 0, previewCoords.x, previewCoords.y, previewCoords.z, true, 1.0, customHash or 0)
+
+    if customHash then
+        SetModelAsNoLongerNeeded(customHash)
+    end
+
     SetEntityHeading(object, heading)
     FreezeEntityPosition(object, true)
     SetEntityCollision(object, false, true)
@@ -166,29 +170,22 @@ local createWeaponPreviewObject = function(hash, customHash)
     return object
 end
 
----@param weaponHash number
----@param components Component[]
----@return number dummyPed
-local createDummyPedWithWeapon = function(weaponHash, components)
-    local model = `mp_m_freemode_01`
+---Attach a component to the weapon object, its model has to be loaded first or nothing shows up
+---@param weaponObject number
+---@param component Component
+local giveComponentToObject = function(weaponObject, component)
+    local model = GetWeaponComponentTypeModel(component.component)
+    local hasModel = model ~= 0 and IsModelInCdimage(model)
 
-    lib.requestModel(model)
-
-    local coords = GetEntityCoords(PlayerPedId())
-    local ped = CreatePed(4, model, coords.x, coords.y, coords.z, 0.0, false, true)
-
-    SetEntityVisible(ped, false, false)
-    SetEntityInvincible(ped, true)
-    FreezeEntityPosition(ped, true)
-    SetEntityCollision(ped, false, false)
-
-    GiveWeaponToPed(ped, weaponHash, 0, true, true)
-
-    for _, component in ipairs(components) do
-        GiveWeaponComponentToPed(ped, weaponHash, component.component)
+    if hasModel then
+        lib.requestModel(model)
     end
 
-    return ped
+    GiveWeaponComponentToWeaponObject(weaponObject, component.component)
+
+    if hasModel then
+        SetModelAsNoLongerNeeded(model)
+    end
 end
 
 ---Get the skin component attached to the weapon, only one can be attached at a time
@@ -217,8 +214,6 @@ end
 ---@param components Component[]
 ---@return number weaponObject New object when a skin change needed a different model
 local updatePreviewComponents = function(weaponObject, weaponHash, prevAttachedComponents, attachedComponents, components)
-    local dummyPed = createDummyPedWithWeapon(weaponHash, components)
-
     local prevModel = getSkinModel(weaponHash, getAttachedSkin(components, prevAttachedComponents or {}))
     local newModel = getSkinModel(weaponHash, getAttachedSkin(components, attachedComponents))
     local respawned = false
@@ -243,11 +238,9 @@ local updatePreviewComponents = function(weaponObject, weaponHash, prevAttachedC
         if wasAttached and not isAttached then
             RemoveWeaponComponentFromWeaponObject(weaponObject, component.component)
         elseif isAttached and not wasAttached then
-            GiveWeaponComponentToWeaponObject(weaponObject, component.component)
+            giveComponentToObject(weaponObject, component)
         end
     end
-
-    DeleteEntity(dummyPed)
 
     return weaponObject
 end
@@ -340,9 +333,8 @@ local openInspection = function(slotId)
     -- Set as soon as the object exists, so closing or an error from here on cleans it up
     local inspecting = {
         object = previewObject,
-        model = model,
         hash = weaponHash,
-        slots = getCompatibleComponentsSlots(nil, components),
+        slots = getCompatibleComponentsSlots(components),
         attachedComponents = attachedComponents,
         slot = slotId,
         components = components,
@@ -539,23 +531,6 @@ RegisterNUICallback('remove', function(data, cb)
     local attachedComponents = lib.callback.await('bryan_weapon_components:server:updateComponents', false, inspecting.slot, component, true)
 
     applyComponentUpdate(inspecting, attachedComponents, cb)
-end)
-
-Citizen.CreateThread(function()
-    while true do
-        if inspectingWeapon then
-            local ped = PlayerPedId()
-
-            -- Close when the preview can no longer be seen properly, it doesn't follow the ped
-            if not DoesEntityExist(inspectingWeapon.object)
-                or IsPedInAnyVehicle(ped, true)
-                or #(GetEntityCoords(ped) - inspectingWeapon.coords) > MAX_MOVE_DISTANCE then
-                exitInspection()
-            end
-        end
-
-        Citizen.Wait(500)
-    end
 end)
 
 AddEventHandler('onResourceStop', function(resourceName)

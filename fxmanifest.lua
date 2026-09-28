@@ -1,6 +1,6 @@
 fx_version 'cerulean'
 game 'gta5'
-version '0.0.0'
+version '1.0.0'
 
 author 'BryaN'
 

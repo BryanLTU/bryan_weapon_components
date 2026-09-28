@@ -163,6 +163,9 @@ onMounted(() => {
             const px = x * window.innerWidth
             const py = y * window.innerHeight
             slotPositions.value[slot] = { x: px, y: py }
+        } else if (action === 'hideSlot') {
+            // Slot is off screen or its bone is missing
+            delete slotPositions.value[e.data.slot]
         } else if (action === 'close') {
             slotPositions.value = {}
             components.value = []

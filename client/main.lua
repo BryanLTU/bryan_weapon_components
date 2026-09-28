@@ -16,6 +16,12 @@
 
 local ox_inventory = exports.ox_inventory
 local inspectingWeapon
+local isOpening = false
+
+-- Preview placement in front of the ped
+local PREVIEW_DISTANCE = 1.0
+local CAMERA_DISTANCE = 1.5
+local PREVIEW_HEIGHT = 0.5
 
 -- Distance the ped can move from where inspection was opened before it closes
 local MAX_MOVE_DISTANCE = 1.0
@@ -111,10 +117,11 @@ local exitInspection = function()
     if inspectingWeapon then
         if DoesEntityExist(inspectingWeapon.object) then
             DeleteEntity(inspectingWeapon.object)
-            RemoveWeaponAsset(GetHashKey(inspectingWeapon.model))
         end
 
-        if DoesCamExist(inspectingWeapon.camera) then
+        RemoveWeaponAsset(inspectingWeapon.hash)
+
+        if inspectingWeapon.camera and DoesCamExist(inspectingWeapon.camera) then
             RenderScriptCams(false, false, 0, true, true)
             DestroyCam(inspectingWeapon.camera, false)
         end
@@ -171,17 +178,24 @@ local updateSlots = function()
             pos = boneIndex ~= -1 and GetWorldPositionOfEntityBone(inspectingWeapon.object, boneIndex) or nil
         end
 
-        if pos then
-            local onScreen, x, y = World3dToScreen2d(pos.x, pos.y, pos.z)
+        local onScreen, x, y = false, 0.0, 0.0
 
-            if onScreen then
-                SendNUIMessage({
-                    action = "updateSlot",
-                    slot = slot.type,
-                    x = x,
-                    y = y
-                })
-            end
+        if pos then
+            onScreen, x, y = World3dToScreen2d(pos.x, pos.y, pos.z)
+        end
+
+        if onScreen then
+            SendNUIMessage({
+                action = "updateSlot",
+                slot = slot.type,
+                x = x,
+                y = y
+            })
+        else
+            SendNUIMessage({
+                action = "hideSlot",
+                slot = slot.type
+            })
         end
     end
 end
@@ -203,7 +217,7 @@ local createWeaponPreviewObject = function(hash, customHash)
     local ped = PlayerPedId()
     local coords = GetEntityCoords(ped)
     local forward = GetEntityForwardVector(ped)
-    local previewCoords = coords + (forward * 1.0) + vector3(0.0, 0.0, 0.5)
+    local previewCoords = coords + (forward * PREVIEW_DISTANCE) + vector3(0.0, 0.0, PREVIEW_HEIGHT)
     local heading = GetEntityHeading(ped) + 180.0
 
     RequestWeaponAsset(hash, 31, 1 | 2 | 4 | 8 | 16 | 32)
@@ -269,31 +283,32 @@ end
 ---Update weapon object's components
 ---@param weaponObject number
 ---@param weaponHash number
+---@param prevAttachedComponents string[]? Components already on the object, nil for a freshly created object
 ---@param attachedComponents string[]
 ---@param components Component[]
-local updatePreviewComponents = function(weaponObject, weaponHash, attachedComponents, components)
+---@return number weaponObject New object when a skin change needed a different model
+local updatePreviewComponents = function(weaponObject, weaponHash, prevAttachedComponents, attachedComponents, components)
     local dummyPed = createDummyPedWithWeapon(weaponHash, components)
 
-    local prevAttachedComponents = inspectingWeapon?.attachedComponents or {}
-    local prevModel = getSkinModel(weaponHash, getAttachedSkin(components, prevAttachedComponents))
+    local prevModel = getSkinModel(weaponHash, getAttachedSkin(components, prevAttachedComponents or {}))
     local newModel = getSkinModel(weaponHash, getAttachedSkin(components, attachedComponents))
     local respawned = false
 
     -- Luxe skins replace the whole weapon model, so the object has to be recreated with it
-    if inspectingWeapon and prevModel ~= newModel then
+    if prevAttachedComponents and prevModel ~= newModel then
         -- Keep the player's rotation on the respawned object
         local rotation = GetEntityRotation(weaponObject, 2)
 
         DeleteEntity(weaponObject)
         weaponObject = createWeaponPreviewObject(weaponHash, newModel)
         SetEntityRotation(weaponObject, rotation.x, rotation.y, rotation.z, 2, true)
-        inspectingWeapon.object = weaponObject
         respawned = true
     end
 
     for _, component in ipairs(components) do
-        -- A respawned object has no components, everything attached has to be given again
-        local wasAttached = not respawned and lib.table.contains(prevAttachedComponents, component.name)
+        -- A respawned or fresh object has no components, everything attached has to be given
+        local wasAttached = not respawned and prevAttachedComponents ~= nil
+            and lib.table.contains(prevAttachedComponents, component.name)
         local isAttached = lib.table.contains(attachedComponents, component.name)
 
         if wasAttached and not isAttached then
@@ -304,21 +319,24 @@ local updatePreviewComponents = function(weaponObject, weaponHash, attachedCompo
     end
 
     DeleteEntity(dummyPed)
+
+    return weaponObject
 end
 
 ---Apply components to the weapon in the player's hands if it is the one being inspected,
 ---ox_inventory only applies metadata components on equip
+---@param inspecting table Inspection the update belongs to, may already be closed
 ---@param attachedComponents string[]
-local syncEquippedWeapon = function(attachedComponents)
+local syncEquippedWeapon = function(inspecting, attachedComponents)
     local currentWeapon = ox_inventory:getCurrentWeapon()
 
-    if not currentWeapon or currentWeapon.slot ~= tonumber(inspectingWeapon.slot) then
+    if not currentWeapon or currentWeapon.slot ~= tonumber(inspecting.slot) then
         return
     end
 
     local ped = PlayerPedId()
 
-    for _, component in ipairs(inspectingWeapon.components) do
+    for _, component in ipairs(inspecting.components) do
         local isAttached = lib.table.contains(attachedComponents, component.name)
         local hasComponent = HasPedGotWeaponComponent(ped, currentWeapon.hash, component.component)
 
@@ -330,16 +348,22 @@ local syncEquippedWeapon = function(attachedComponents)
     end
 end
 
-RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
-    if IsPedInAnyVehicle(PlayerPedId(), true) then
-        lib.notify({
-            title = 'Weapon Component',
-            description = 'You cannot inspect weapons in a vehicle',
-            type = 'error'
-        })
-        return
-    end
+---Check there is room in front of the ped for the preview and camera
+---@param ped number
+---@return boolean
+local hasPreviewSpace = function(ped)
+    local from = GetEntityCoords(ped) + vector3(0.0, 0.0, PREVIEW_HEIGHT)
+    local to = from + GetEntityForwardVector(ped) * (CAMERA_DISTANCE + 0.3)
 
+    local handle = StartExpensiveSynchronousShapeTestLosProbe(from.x, from.y, from.z, to.x, to.y, to.z, 1 | 2 | 16, ped, 7)
+    local _, hit = GetShapeTestResult(handle)
+
+    return not (hit == true or hit == 1)
+end
+
+---Create the preview and camera, then open the UI
+---@param slotId number
+local openInspection = function(slotId)
     local weaponData = lib.callback.await('bryan_weapon_components:server:getWeapon', false, slotId)
 
     if not weaponData?.model then
@@ -358,33 +382,47 @@ RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
 
     local availableComponents = lib.callback.await('bryan_weapon_components:server:getInventoryComponents', false, components)
 
-    local skinModel = getSkinModel(weaponHash, getAttachedSkin(components, attachedComponents))
-    local previewObject = createWeaponPreviewObject(weaponHash, skinModel)
-    -- Components
-    updatePreviewComponents(previewObject, weaponHash, attachedComponents, components)
-
     local ped = PlayerPedId()
     local coords = GetEntityCoords(ped)
-    local forward = GetEntityForwardVector(ped)
-    local camCoords = coords + (forward * 1.5) + vector3(0.0, 0.0, 0.5)
-    local cam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
-    SetCamCoord(cam, camCoords.x, camCoords.y, camCoords.z)
-    PointCamAtEntity(cam, previewObject, 0.0, 0.0, 0.0, false)
-    SetCamActive(cam, true)
-    RenderScriptCams(true, true, 500, true, true)
 
-    inspectingWeapon = {
+    local skinModel = getSkinModel(weaponHash, getAttachedSkin(components, attachedComponents))
+    local previewObject = createWeaponPreviewObject(weaponHash, skinModel)
+
+    -- Set as soon as the object exists, so closing or an error from here on cleans it up
+    local inspecting = {
         object = previewObject,
         model = model,
-        camera = cam,
+        hash = weaponHash,
         slots = getCompatibleComponentsSlots(nil, components),
         attachedComponents = attachedComponents,
         slot = slotId,
         components = components,
         coords = coords
     }
+    inspectingWeapon = inspecting
+
+    inspecting.object = updatePreviewComponents(previewObject, weaponHash, nil, attachedComponents, components)
+
+    -- Closed while loading, don't create a camera nothing will clean up
+    if inspectingWeapon ~= inspecting then
+        return
+    end
+
+    local forward = GetEntityForwardVector(ped)
+    local camCoords = coords + (forward * CAMERA_DISTANCE) + vector3(0.0, 0.0, PREVIEW_HEIGHT)
+    local cam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
+    SetCamCoord(cam, camCoords.x, camCoords.y, camCoords.z)
+    PointCamAtEntity(cam, inspecting.object, 0.0, 0.0, 0.0, false)
+    SetCamActive(cam, true)
+    RenderScriptCams(true, true, 500, true, true)
+    inspecting.camera = cam
 
     Citizen.Wait(1000)
+
+    if inspectingWeapon ~= inspecting then
+        return
+    end
+
     updateSlots()
 
     -- NUI open
@@ -393,6 +431,42 @@ RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
         availableComponents = availableComponents,
         attachedComponents = getAttachedComponents(components, attachedComponents)
     })
+end
+
+RegisterNetEvent('bryan_weapon_components:client:inspect', function(slotId)
+    if inspectingWeapon or isOpening then
+        return
+    end
+
+    local ped = PlayerPedId()
+
+    if IsPedInAnyVehicle(ped, true) then
+        lib.notify({
+            title = 'Weapon Component',
+            description = 'You cannot inspect weapons in a vehicle',
+            type = 'error'
+        })
+        return
+    end
+
+    if not hasPreviewSpace(ped) then
+        lib.notify({
+            title = 'Weapon Component',
+            description = 'Not enough space in front of you',
+            type = 'error'
+        })
+        return
+    end
+
+    isOpening = true
+    local ok, err = pcall(openInspection, slotId)
+    isOpening = false
+
+    -- Never leave the player with NUI focus and no UI
+    if not ok then
+        exitInspection()
+        error(err, 0)
+    end
 end)
 
 RegisterNUICallback("close", function(_, cb)
@@ -401,7 +475,7 @@ RegisterNUICallback("close", function(_, cb)
 end)
 
 RegisterNUICallback("rotatePreviewDelta", function(data, cb)
-    if not DoesEntityExist(inspectingWeapon.object) then return cb({}) end
+    if not inspectingWeapon or not DoesEntityExist(inspectingWeapon.object) then return cb({}) end
 
     local deltaYaw = data.deltaYaw or 0.0
     local deltaPitch = data.deltaPitch or 0.0
@@ -412,17 +486,53 @@ RegisterNUICallback("rotatePreviewDelta", function(data, cb)
 
     pitch = math.max(-89.0, math.min(89.0, pitch))
 
-    SetEntityRotation(inspectingWeapon.object, pitch, 0.0, yaw, 0, true)
+    SetEntityRotation(inspectingWeapon.object, pitch, 0.0, yaw, 2, true)
     updateSlots()
 
     cb({})
 end)
 
+---Apply components returned by the server to the equipped weapon, the preview and the UI
+---@param inspecting table Inspection the request was made from
+---@param attachedComponents string[]|false
+---@param cb function
+local applyComponentUpdate = function(inspecting, attachedComponents, cb)
+    if not attachedComponents then
+        return cb(false)
+    end
+
+    -- The weapon in hands has to match its metadata even if the inspection was closed meanwhile
+    syncEquippedWeapon(inspecting, attachedComponents)
+
+    local availableComponents = lib.callback.await('bryan_weapon_components:server:getInventoryComponents', false, inspecting.components)
+
+    if inspectingWeapon ~= inspecting then
+        return cb(false)
+    end
+
+    local object = updatePreviewComponents(inspecting.object, inspecting.hash, inspecting.attachedComponents, attachedComponents, inspecting.components)
+
+    if inspectingWeapon ~= inspecting then
+        DeleteEntity(object)
+        return cb(false)
+    end
+
+    inspecting.object = object
+    inspecting.attachedComponents = attachedComponents
+    refreshSlots()
+
+    cb({
+        attachedComponents = getAttachedComponents(inspecting.components, attachedComponents),
+        availableComponents = availableComponents
+    })
+end
+
 RegisterNUICallback('attach', function(data, cb)
+    local inspecting = inspectingWeapon
     local slotType = data.slot
     local component = data.component
 
-    if not slotType or not component then
+    if not inspecting or not slotType or not component then
         return cb(false)
     end
 
@@ -441,7 +551,7 @@ RegisterNUICallback('attach', function(data, cb)
         end
     end
 
-    if not DoesWeaponTakeWeaponComponent(inspectingWeapon.model, component.component) then
+    if not DoesWeaponTakeWeaponComponent(inspecting.hash, component.component) then
         lib.notify({
             title = 'Weapon Component',
             description = 'Weapon does not take this component',
@@ -450,34 +560,20 @@ RegisterNUICallback('attach', function(data, cb)
         return cb(false)
     end
 
-    local attachedComponents = lib.callback.await('bryan_weapon_components:server:updateComponents', false, inspectingWeapon.slot, component)
+    local attachedComponents = lib.callback.await('bryan_weapon_components:server:updateComponents', false, inspecting.slot, component)
 
-    if attachedComponents then
-        local availableComponents = lib.callback.await('bryan_weapon_components:server:getInventoryComponents', false, inspectingWeapon.components)
-
-        updatePreviewComponents(inspectingWeapon.object, GetHashKey(inspectingWeapon.model), attachedComponents, inspectingWeapon.components)
-        syncEquippedWeapon(attachedComponents)
-
-        inspectingWeapon.attachedComponents = attachedComponents
-        refreshSlots()
-
-        return cb({
-            attachedComponents = getAttachedComponents(inspectingWeapon.components, attachedComponents),
-            availableComponents = availableComponents
-        })
-    end
-
-    cb({})
+    applyComponentUpdate(inspecting, attachedComponents, cb)
 end)
 
 RegisterNUICallback('remove', function(data, cb)
+    local inspecting = inspectingWeapon
     local slotType = data.slot
 
-    if not slotType then
+    if not inspecting or not slotType then
         return cb(false)
     end
 
-    local component = lib.array.find(inspectingWeapon.components, function(c)
+    local component = lib.array.find(inspecting.components, function(c)
         return c.type == slotType
     end)
 
@@ -490,26 +586,10 @@ RegisterNUICallback('remove', function(data, cb)
         return cb(false)
     end
 
-    local attachedComponents = lib.callback.await('bryan_weapon_components:server:updateComponents', false, inspectingWeapon.slot, component, true)
+    local attachedComponents = lib.callback.await('bryan_weapon_components:server:updateComponents', false, inspecting.slot, component, true)
 
-    if attachedComponents then
-        local availableComponents = lib.callback.await('bryan_weapon_components:server:getInventoryComponents', false, inspectingWeapon.components)
-
-        updatePreviewComponents(inspectingWeapon.object, GetHashKey(inspectingWeapon.model), attachedComponents, inspectingWeapon.components)
-        syncEquippedWeapon(attachedComponents)
-
-        inspectingWeapon.attachedComponents = attachedComponents
-        refreshSlots()
-
-        return cb({
-            attachedComponents = getAttachedComponents(inspectingWeapon.components, attachedComponents),
-            availableComponents = availableComponents
-        })
-    end
-
-    cb(false)
+    applyComponentUpdate(inspecting, attachedComponents, cb)
 end)
-
 
 Citizen.CreateThread(function()
     while true do

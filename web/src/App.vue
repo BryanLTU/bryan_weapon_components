@@ -126,6 +126,9 @@ const isRotatingEnabled = ref(true)
 const isDragging = ref(false)
 let lastX = 0
 let lastY = 0
+let pendingYaw = 0
+let pendingPitch = 0
+let rotateFrame = 0
 
 const mouseX = ref(0)
 const mouseY = ref(0)
@@ -214,10 +217,25 @@ const handleMouseMove = (e: MouseEvent) => {
     lastX = e.clientX
     lastY = e.clientY
 
+    pendingYaw += deltaX * 0.5
+    pendingPitch += -deltaY * 0.5
+
+    // Mouse moves fire far more often than frames, send at most one rotation per frame
+    if (!rotateFrame) {
+        rotateFrame = requestAnimationFrame(sendRotation)
+    }
+}
+
+const sendRotation = () => {
+    rotateFrame = 0
+
     api.post('rotatePreviewDelta', {
-        deltaYaw: deltaX * 0.5,
-        deltaPitch: -deltaY * 0.5
+        deltaYaw: pendingYaw,
+        deltaPitch: pendingPitch
     })
+
+    pendingYaw = 0
+    pendingPitch = 0
 }
 
 const startDrag = (e: MouseEvent, item: ComponentItem | undefined, slotName: string | null) => {
